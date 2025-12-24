@@ -8,17 +8,16 @@ import uvicorn
 # 1. إعداد التطبيق
 app = FastAPI()
 
-# 2. إعدادات CORS (ضرورية جداً عشان تطبيقك وفلاتر يقدروا يتصلوا بالسيرفر)
+# 2. إعدادات CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # يسمح بالاتصال من أي مكان
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # 3. الاتصال بـ Firebase
-# السيرفر سيبحث عن ملف المفتاح، تأكد أنه مرفوع معه
 if not firebase_admin._apps:
     try:
         cred = credentials.Certificate("firebase_key.json")
@@ -38,16 +37,16 @@ products_db = [
     {"id": "6", "name": "Smart Watch", "category": "tech", "price": 200.0},
 ]
 
-# 4. الرابط الرئيسي (Health Check)
+# 4. الرابط الرئيسي
 @app.get("/")
 def home():
     return {"status": "Online", "message": "AI Recommender Server is Running!"}
 
-# 5. رابط التوصيات
+# 5. رابط التوصيات (النسخة الذكية والمعدلة)
 @app.get("/recommend/{user_id}")
 def recommend_products(user_id: str):
     try:
-        # جلب بيانات المستخدم من Firestore
+        # أ. جلب بيانات المستخدم من Firestore
         user_ref = db.collection("users").document(user_id)
         user_doc = user_ref.get()
 
@@ -55,30 +54,41 @@ def recommend_products(user_id: str):
             return {"status": "error", "message": "User not found in Database"}
 
         user_data = user_doc.to_dict()
-        interests = user_data.get("interests", [])
         
-        # فلترة المنتجات حسب الاهتمامات
+        # ب. تنظيف الاهتمامات (تحويلها لحروف صغيرة وإزالة المسافات)
+        raw_interests = user_data.get("interests", [])
+        clean_interests = []
+        
+        # نتأكد أنها قائمة وننظف كل كلمة فيها
+        if isinstance(raw_interests, list):
+            clean_interests = [str(i).lower().strip() for i in raw_interests]
+        
+        # ج. فلترة المنتجات (مقارنة ذكية تتجاهل حالة الأحرف)
         recommended_items = []
-        if interests:
-            recommended_items = [p for p in products_db if p["category"] in interests]
+        if clean_interests:
+            recommended_items = [
+                p for p in products_db 
+                if p["category"].lower() in clean_interests
+            ]
         
-        # إذا لم نجد تطابق، نرجع منتجات افتراضية
+        # د. الخطة البديلة: إذا لم نجد تطابق نرجع منتجات افتراضية
         if not recommended_items:
             recommended_items = products_db[:3]
 
+        # هـ. الرد مع معلومات التصحيح لنعرف السبب
         return {
             "status": "success",
             "source": "Live Server Data",
             "user_id": user_id,
-            "user_interests": interests,
+            "found_interests_in_db": raw_interests,  # شو لقينا في الداتا بيس
+            "cleaned_interests": clean_interests,    # شو فهم الكود
             "recommendations": recommended_items
         }
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 6. تشغيل السيرفر (التعديل المهم للاستضافة)
+# 6. تشغيل السيرفر
 if __name__ == "__main__":
-    # يأخذ المنفذ من بيئة الاستضافة، أو يستخدم 8085 إذا كنت تجربه محلياً
     port = int(os.environ.get("PORT", 8085))
     uvicorn.run(app, host="0.0.0.0", port=port)
